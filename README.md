@@ -12,49 +12,54 @@ would have been: the SoC-level bring-up (Buildroot toolchain, kernel/U-Boot
 pinning, GPIO bank layout) carries over directly, and only the
 module/carrier-specific device tree bits needed rework.
 
-## Status: builds the Elixir/Buildroot scaffold, hardware bring-up incomplete
+## Status: builds cleanly, not yet boot-tested on hardware
 
-This has not been booted on real Core3566 hardware. Treat the confidence
-notes below as a map of what's been mechanically adapted vs. what still
-needs verification against real hardware or vendor schematics.
+This has not been booted on real Core3566 hardware. It was first adapted
+"cold" from the Core3566 module datasheet alone (edge-connector pinout,
+no schematic), which meant guessing at things like the power IC. Those
+guesses have since been corrected against
+[`buldo/core3566-yocto`](https://github.com/buldo/core3566-yocto), a
+third-party Yocto BSP for this exact board (Luckfox Core3566) with
+working kernel/U-Boot device tree patches traceable to Radxa/Luckfox
+vendor sources -- not a schematic, but real evidence from someone else's
+working build, which is much stronger than a datasheet-only guess.
 
-**Carried over from the working `nerves_system_radxa_cm3` base (high
-confidence -- same SoC):**
+**High confidence (SoC-generic, or confirmed by the Luckfox BSP):**
 
 * Buildroot/toolchain plumbing, Linux 6.1.39 kernel pin, custom U-Boot
   (`pgwipeout/u-boot-quartz64.git`) pin, `rkbin` package for DDR init/ATF
   blobs
 * GPIO bank layout (`gpio0`-`gpio4`, `gpio-ranges`), USB host/OTG PHY wiring,
   eMMC (`sdhci`) 8-bit HS200 configuration
-* Ethernet: RTL8211F RGMII wiring via `gmac1`/`mdio1` -- the Core3566
-  datasheet confirms an on-board RTL8211F, matching the CM3 base as-is
+* Ethernet: RTL8211F RGMII wiring via `gmac1`/`mdio1`
+* **Power/PMIC**: RK817 at i2c0/0x20, plus a separate TCS4525 CPU buck at
+  i2c0/0x1c, with the full regulator tree (`vdd_logic`, `vdd_gpu_npu`,
+  `vcc_ddr`, etc.) -- matches both the Luckfox BSP and the original CM3
+  base this was forked from, which independently agree on this PMIC.
+* LEDs: activity LED at GPIO4_A4, status LED at GPIO0_A6 -- both confirmed
+  by the Luckfox BSP (the Core3566 datasheet's own "Pi_nLED_Activity" pin
+  note turned out to be misleading; this project's earlier attempt to
+  follow it literally was wrong).
+* WiFi/BT: AP6256 module (BCM43455-FMAC over SDIO on `sdmmc1`, BCM4345C5
+  over UART1) wired up per the Luckfox BSP's GPIO assignments, with the
+  matching kernel drivers (`CFG80211`/`BRCMFMAC`, `BT_HCIUART_BCM`) and
+  firmware package (`BR2_PACKAGE_LINUX_FIRMWARE_BRCM_BCM43XXX`) added.
+  This project's earlier datasheet-only guess had WiFi and BT's GPIOs
+  swapped relative to what Luckfox's BSP actually uses -- another reason
+  to trust the BSP over the raw datasheet pinout table here.
 
-**Adapted using data straight from the Core3566 datasheet's pinout table
-(medium-high confidence -- module pins are documented, but unverified on
-hardware):**
+**Known gaps:**
 
-* WiFi/BT enable pinctrl: `WL_nDisable` -> GPIO2_B1 (module pin 89),
-  `BT_nDisable` -> GPIO2_B7 (module pin 91). Neither is wired to an
-  `mmc-pwrseq`/bluetooth node yet -- see "Known gaps" below.
-* Activity LED: `Pi_nLED_Activity` -> GPIO0_C5 (module pin 21)
-
-**Known gaps (need a real schematic or hardware to close):**
-
-* **Power/PMIC.** The datasheet documents the module's 200-pin edge
-  connector, not the on-board "Power IC" visible in the board photo. Its
-  identity and real regulator rails are unknown, so `linux/rk3566-core3566.dts`
-  stands in with `regulator-fixed` nodes at RK3566's nominal voltages
-  (`vdd_cpu`/`vdd_gpu`/`vdd_logic` at 0.9V, etc.) instead of a PMIC driver
-  copied from the CM3's RK817. This should boot, but CPU/GPU voltage will
-  **not** scale with frequency until the real PMIC is identified and wired
-  up -- don't assume full 1.8GHz is safe under this config without checking.
-* **WiFi/BT driver stack.** AP6256 (per datasheet) needs `brcmfmac`
-  firmware + an `mmc-pwrseq-simple`/bluetooth node pointed at the pins
-  above. Not wired up yet.
-* **Carrier-board specifics** (buttons, extra LEDs, display/camera wiring)
-  are entirely carrier-dependent and not covered here -- the CM3 base's
-  `pi-led-green`/`pwr-led-red` nodes were dropped rather than carried over
-  unverified.
+* None of the above is hardware-verified -- `buldo/core3566-yocto` is
+  itself unverified-by-us evidence (a plausible, detailed third-party
+  BSP, not a vendor schematic), not proof.
+* WiFi/BT firmware coverage for the exact BCM43455/BCM4345C5 pair inside
+  `BR2_PACKAGE_LINUX_FIRMWARE_BRCM_BCM43XXX` hasn't been independently
+  confirmed file-by-file.
+* **Carrier-board specifics** (buttons, display/camera wiring) beyond
+  what's covered above are still carrier-dependent and not addressed
+  here -- display/camera/GPU are left disabled since this targets a
+  headless Nerves deployment.
 
 ## Building
 
@@ -178,4 +183,4 @@ because the glibc version is too high (carried over from the CM3 base's
 
 `linux/rk3566-core3566.dts` is a custom out-of-tree device tree, built via
 `BR2_LINUX_KERNEL_CUSTOM_DTS_PATH`. See the "Status" section above for what's
-verified vs. still a placeholder.
+backed by the `buldo/core3566-yocto` BSP vs. still unverified.
