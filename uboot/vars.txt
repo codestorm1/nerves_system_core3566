@@ -1,3 +1,6 @@
 overlays=
 fdtfile=rk3566-core3566.dtb
-extra_bootargs="quiet"
+# Console on by default for first bring-up -- ttyS2/1500000 matches the
+# chosen/stdout-path in the verified buldo/core3566-yocto DTS ("serial2").
+# Switch back to "quiet" once boot is confirmed working.
+extra_bootargs="earlyprintk console=ttyS2,1500000n8"
