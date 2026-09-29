@@ -1,8 +1,8 @@
-defmodule NervesSystemRadxaCm3.MixProject do
+defmodule NervesSystemCore3566.MixProject do
   use Mix.Project
 
-  @github_organization "sportalliance"
-  @app :nerves_system_radxa_cm3
+  @github_organization "codestorm1"
+  @app :nerves_system_core3566
   @source_url "https://github.com/#{@github_organization}/#{@app}"
   @version Path.join(__DIR__, "VERSION")
            |> File.read!()
@@ -76,7 +76,7 @@ defmodule NervesSystemRadxaCm3.MixProject do
 
   defp description do
     """
-    Nerves System - Radxa CM3, Pine64 SOQuartz
+    Nerves System - Core3566 (RK3566)
     """
   end
 

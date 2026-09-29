@@ -1,79 +1,98 @@
-# Generic RK3566 (Radxa CM3, ~~Pine64 SOQuartz~~) Support
+# nerves_system_core3566
 
+Nerves system for the Core3566 SoM (Rockchip RK3566, quad-core Cortex-A55,
+CM4-compatible DF40 edge connector).
 
-This is the base Nerves System configuration for the [Radxa CM3](https://wiki.radxa.com/Rock3/CM/CM3) and ~~[Pine64 SOQuartz](https://wiki.pine64.org/wiki/SOQuartz)~~.
+This is a from-scratch port, adapted from
+[`nerves_system_radxa_cm3`](https://github.com/sportalliance/nerves_system_radxa_cm3) --
+an existing Nerves system for the Radxa CM3, which uses the *same* RK3566 SoC
+and the *same* CM4-form-factor DF40C-100DS connector as the Core3566. That
+made it a much closer starting point than a generic Buildroot board file
+would have been: the SoC-level bring-up (Buildroot toolchain, kernel/U-Boot
+pinning, GPIO bank layout) carries over directly, and only the
+module/carrier-specific device tree bits needed rework.
 
-**Note:** The Radxa CM3 configuration is built by default.
-To create a SOQuartz image you have to adapt some config files to point to the correct device tree overlays.
+## Status: builds the Elixir/Buildroot scaffold, hardware bring-up incomplete
 
+This has not been booted on real Core3566 hardware. Treat the confidence
+notes below as a map of what's been mechanically adapted vs. what still
+needs verification against real hardware or vendor schematics.
 
-| Feature              | Description                     |
-| -------------------- | ------------------------------- |
-| CPU                  | TODO             |
-| Memory               | TODO                    |
-| Storage              | only eMMC supported  |
-| Linux kernel         | 6.0               |
-| IEx terminal         | SSH                   |
-| GPIO, I2C, SPI       | Yes - [Elixir Circuits](https://github.com/elixir-circuits) |
-| ADC                  | Untested                             |
-| PWM                  | Untested      |
-| UART                 | ttyS1 + ttyS2 + more via device tree overlay |
-| Camera               | Disabled                           |
-| Ethernet             | Yes                             |
-| WiFi                 | Disabled, No working driver |
-| HW Watchdog          | ? |
+**Carried over from the working `nerves_system_radxa_cm3` base (high
+confidence -- same SoC):**
 
-## Versioning
+* Buildroot/toolchain plumbing, Linux 6.1.39 kernel pin, custom U-Boot
+  (`pgwipeout/u-boot-quartz64.git`) pin, `rkbin` package for DDR init/ATF
+  blobs
+* GPIO bank layout (`gpio0`-`gpio4`, `gpio-ranges`), USB host/OTG PHY wiring,
+  eMMC (`sdhci`) 8-bit HS200 configuration
+* Ethernet: RTL8211F RGMII wiring via `gmac1`/`mdio1` -- the Core3566
+  datasheet confirms an on-board RTL8211F, matching the CM3 base as-is
 
-The version numbers of this repo are set to be compatible to the [Nerves System RPI4](https://github.com/nerves-project/nerves_system_rpi4).
+**Adapted using data straight from the Core3566 datasheet's pinout table
+(medium-high confidence -- module pins are documented, but unverified on
+hardware):**
 
-E.g. v1.20.2 of this repo has the same package dependencies as v1.20.2 of the [Nerves System RPI4](https://github.com/nerves-project/nerves_system_rpi4).
+* WiFi/BT enable pinctrl: `WL_nDisable` -> GPIO2_B1 (module pin 89),
+  `BT_nDisable` -> GPIO2_B7 (module pin 91). Neither is wired to an
+  `mmc-pwrseq`/bluetooth node yet -- see "Known gaps" below.
+* Activity LED: `Pi_nLED_Activity` -> GPIO0_C5 (module pin 21)
 
-This makes it easier to use this repo as a drop-in replacement for the Raspberry PI 4.
+**Known gaps (need a real schematic or hardware to close):**
+
+* **Power/PMIC.** The datasheet documents the module's 200-pin edge
+  connector, not the on-board "Power IC" visible in the board photo. Its
+  identity and real regulator rails are unknown, so `linux/rk3566-core3566.dts`
+  stands in with `regulator-fixed` nodes at RK3566's nominal voltages
+  (`vdd_cpu`/`vdd_gpu`/`vdd_logic` at 0.9V, etc.) instead of a PMIC driver
+  copied from the CM3's RK817. This should boot, but CPU/GPU voltage will
+  **not** scale with frequency until the real PMIC is identified and wired
+  up -- don't assume full 1.8GHz is safe under this config without checking.
+* **WiFi/BT driver stack.** AP6256 (per datasheet) needs `brcmfmac`
+  firmware + an `mmc-pwrseq-simple`/bluetooth node pointed at the pins
+  above. Not wired up yet.
+* **Carrier-board specifics** (buttons, extra LEDs, display/camera wiring)
+  are entirely carrier-dependent and not covered here -- the CM3 base's
+  `pi-led-green`/`pwr-led-red` nodes were dropped rather than carried over
+  unverified.
 
 ## Building
 
-### Building for the Radxa CM3
-
-This is the default configuration. Just call `mix deps.get` and `mix compile`.
-
-### Building for the SOQuartz
-
-1. Adapt the `fdtfile` definition in `uboot/vars.txt` to point to the correct device tree overlay (`rk3566-soquartz-cm4`).
-    - The file is already automatically built and copied to the output directory.
-1. Also don't forget to include the overlay file in `fwup.conf`
-1. Change the `CONFIG_DEFAULT_DEVICE_TREE` definition in `uboot/uboot.defconfig` to `rk3566-soquartz-cm4io`
+```sh
+mix deps.get
+mix compile
+```
 
 ## Using
 
-The most common way of using this Nerves System is create a project with `mix
-nerves.new` and to export `MIX_TARGET=rcm3`. See the [Getting started
+The most common way of using this Nerves System is to create a project with
+`mix nerves.new` and export `MIX_TARGET=core3566`. See the [Getting started
 guide](https://hexdocs.pm/nerves/getting-started.html#creating-a-new-nerves-app)
 for more information.
 
-If you need custom modifications to this system for your device, clone this
-repository and update as described in [Making custom
-systems](https://hexdocs.pm/nerves/customizing-systems.html).
-
 ## Flashing
 
-*These instructions have to be executed in the project folder, **not** the nerves_system folder!*
+*These instructions have to be executed in the project folder, **not** the
+nerves_system folder!*
 
-1. Clone, Build and Install the [rkdeveloptool](https://github.com/rockchip-linux/rkdeveloptool.git)
-    - Or install install the `rkflashtool` package from your Linux repository
-1. Compile the project (`mix firmware`)
-1. Create the image file (`fwup -a -d _build/<target name>/nerves/images/image.img -i _build/<target name>/nerves/images/<project name>.fw -t complete`)
-1. Put the board in maskrom mode and conenct it via USB to the PC
-    - Radxa CM3: Power off the board, press the yellow button next to the WIFI chip, power on the board
-    - Pine64 SOQuartz: Remove the eMMC module, power-on the board, connect the eMMC module again
+1. Clone, build and install [rkdeveloptool](https://github.com/rockchip-linux/rkdeveloptool.git)
+   (or install `rkflashtool` from your Linux distro).
+1. Compile the project (`mix firmware`).
+1. Create the image file:
+   `fwup -a -d _build/<target name>/nerves/images/image.img -i _build/<target name>/nerves/images/<project name>.fw -t complete`
+1. Put the board in MASKROM mode and connect it via USB to the PC. Per the
+   Core3566 datasheet: hold `nRPIBOOT` (module pin 93) low at power-on, or
+   -- if no SD card is connected -- hold the carrier board's boot button
+   (tied to `eMMC_D0`, module pin 68) low at power-on. The exact mechanism
+   depends on your carrier board.
 1. `sudo rkdeveloptool db support_files/rk356x_spl_loader_ddr1056_v1.10.111.bin`
 1. `sudo rkdeveloptool wl 0 _build/<target name>/nerves/images/image.img`
 1. `sudo rkdeveloptool rd`
 
 ## GPIO Numbering
 
-The RK3566 has multiple IO banks, GPIO0 to GPIO4, with each bank having 32 pins.
-These banks are further divided into 4 sub-banks, GPIOx_A to GPIOx_D:
+The RK3566 has multiple IO banks, GPIO0 to GPIO4, with each bank having 32
+pins. These banks are further divided into 4 sub-banks, GPIOx_A to GPIOx_D:
 ```
 GPIO0_A0 - GPIO0_A7
 GPIO0_B0 - GPIO0_B7
@@ -96,22 +115,22 @@ GPIO3_A1 = 97 (3*32 + 0*8 + 1)
 GPIO4_D7 = 159 (4*32 + 3*8 + 7)
 ```
 
-Check the [respective page on the CM3 wiki](https://wiki.radxa.com/Rock3/CM/CM3/pinout) for the pinout.
-
+The Core3566 datasheet's Chapter 4 (Pinout) gives the module pin -> GPIO
+mapping for all 28 edge-connector GPIO signals.
 
 ## Console access
 
-The console is currently not configured.
-It can be enabled by modifying the boot arguments in `uboot/vars.txt`:
+The console is currently not configured. It can be enabled by modifying the
+boot arguments in `uboot/vars.txt`:
 ```
 extra_bootargs="earlyprintk console=ttyS2,1500000n8"
 ```
 
 ## Provisioning devices
 
-This system supports storing provisioning information in a small key-value store
-outside of any filesystem. Provisioning is an optional step and reasonable
-defaults are provided if this is missing.
+This system supports storing provisioning information in a small key-value
+store outside of any filesystem. Provisioning is an optional step and
+reasonable defaults are provided if this is missing.
 
 Provisioning information can be queried using the Nerves.Runtime KV store's
 [`Nerves.Runtime.KV.get/1`](https://hexdocs.pm/nerves_runtime/Nerves.Runtime.KV.html#get/1)
@@ -123,51 +142,40 @@ Key                    | Example Value     | Description
 :--------------------- | :---------------- | :----------
 `nerves_serial_number` | `"12345678"`       | By default, this string is used to create unique hostnames and Erlang node names. If unset, it defaults to part of the module's serial number.
 
-The normal procedure would be to set these keys once in manufacturing or before
-deployment and then leave them alone.
+The normal procedure would be to set these keys once in manufacturing or
+before deployment and then leave them alone.
 
-For example, to provision a serial number on a running device, run the following
-and reboot:
+For example, to provision a serial number on a running device, run the
+following and reboot:
 
 ```elixir
 iex> cmd("fw_setenv nerves_serial_number 12345678")
 ```
 
-This system supports setting the serial number offline. To do this, set the
-`NERVES_SERIAL_NUMBER` environment variable when burning the firmware. If you're
-programming MicroSD cards using `fwup`, the commandline is:
-
-```sh
-sudo NERVES_SERIAL_NUMBER=12345678 fwup path_to_firmware.fw
-```
-
 Serial numbers are stored on the MicroSD card so if the MicroSD card is
-replaced, the serial number will need to be reprogrammed. The numbers are stored
-in a U-boot environment block. This is a special region that is separate from
-the application partition so reformatting the application partition will not
-lose the serial number or any other data stored in this block.
+replaced, the serial number will need to be reprogrammed. The numbers are
+stored in a U-boot environment block. This is a special region that is
+separate from the application partition so reformatting the application
+partition will not lose the serial number or any other data stored in this
+block.
 
 Additional key value pairs can be provisioned by overriding the default
 provisioning.conf file location by setting the environment variable
-`NERVES_PROVISIONING=/path/to/provisioning.conf`. The default provisioning.conf
-will set the `nerves_serial_number`, if you override the location to this file,
-you will be responsible for setting this yourself.
+`NERVES_PROVISIONING=/path/to/provisioning.conf`. The default
+provisioning.conf will set the `nerves_serial_number`; if you override the
+location to this file, you will be responsible for setting this yourself.
 
 ## Linux, U-Boot and Toolchain versions
 
-This Nerves system uses the latest mainline Linux kernel (6.0) and compiler toolchain.
-The available kernel versions can be found on [kernel.org](https://mirrors.edge.kernel.org/pub/linux/kernel).
+This Nerves system uses Linux 6.1.39 and a custom U-Boot repository
+(`pgwipeout/u-boot-quartz64.git`) with patches for RK3566 chips.
 
-It uses a custom U-Boot repository (version 2022.04) with patches for the RK3566 chips.
+Don't update the toolchain for now -- newer toolchains cause a kernel panic
+because the glibc version is too high (carried over from the CM3 base's
+`NOTES.md`).
 
-## Device tree overlays
+## Device tree
 
-Currently almost all hw-functions are disabled via the `rk3566-radxa-cm3-spa.dtb` file.
-They can be re-enabled by using the upstream `rk3566-radxa-cm3-io.dtb` or `rk3566-radxa-cm3-rpi-cm4-io.dtb`
-overlay. You can do this by editing the `vars.txt` and `fwup.conf` files.
-You also have to update the `BR2_LINUX_KERNEL_INTREE_DTS_NAME` definition in the `nerves_defconfig` file.
-
-Additional overlays can be enabled in the `vars.txt` file.
-Make sure to update `fwup.conf` to copy the respective overlay to the boot partition!
-
-**Note:** The mainline Linux Kernel does not provide any Rockchip specific overlay blobs to enable specific hardware functions (Uarts, I2C, SPI, ...). You have to manually download them from the [Radxa Kernel repo](https://github.com/radxa/kernel/tree/stable-4.19-rock3/arch/arm64/boot/dts/rockchip/overlay), compile them and include them in the image.
+`linux/rk3566-core3566.dts` is a custom out-of-tree device tree, built via
+`BR2_LINUX_KERNEL_CUSTOM_DTS_PATH`. See the "Status" section above for what's
+verified vs. still a placeholder.
